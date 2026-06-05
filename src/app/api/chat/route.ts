@@ -54,14 +54,16 @@ export async function POST(req: NextRequest) {
     let completion: OpenAI.Chat.ChatCompletion;
     try {
       completion = await client.chat.completions.create({
-        model: "google/gemini-2.0-flash-001",
+        model: "openrouter/auto",
         messages,
         temperature: 0.7,
         max_tokens: 1500,
       });
     } catch (err) {
+      const isApiErr = err instanceof OpenAI.APIError;
+      const status = isApiErr ? err.status : "network";
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[chat] OpenRouter API call failed:", errMsg);
+      console.error(`[chat] OpenRouter API call failed [${status}]:`, errMsg);
       return NextResponse.json(
         { error: "AI 서비스 오류가 발생했습니다. 잠시 후 다시 시도해주세요." },
         { status: 502 }
@@ -94,6 +96,11 @@ export async function POST(req: NextRequest) {
     const aiMessage = parsed.message || "응답을 처리하는 중 오류가 발생했습니다.";
     const analysis = parsed.analysis;
 
+    const validUrgency = ["normal", "urgent", "emergency"];
+    const urgencyLevel = validUrgency.includes(analysis?.urgencyLevel ?? "")
+      ? analysis!.urgencyLevel
+      : "normal";
+
     supabase
       .from("consultation_records")
       .insert({
@@ -101,10 +108,10 @@ export async function POST(req: NextRequest) {
         user_message: message,
         ai_response: aiMessage,
         intent: analysis?.intent ?? null,
-        symptoms: analysis?.symptoms ?? null,
-        possible_conditions: analysis?.possibleConditions ?? null,
-        recommended_departments: analysis?.recommendedDepartments ?? null,
-        urgency_level: analysis?.urgencyLevel ?? null,
+        symptoms: Array.isArray(analysis?.symptoms) ? analysis.symptoms : null,
+        possible_conditions: Array.isArray(analysis?.possibleConditions) ? analysis.possibleConditions : null,
+        recommended_departments: Array.isArray(analysis?.recommendedDepartments) ? analysis.recommendedDepartments : null,
+        urgency_level: urgencyLevel,
       })
       .then(({ error }) => {
         if (error) console.error("[chat] Supabase insert error:", error.message);
