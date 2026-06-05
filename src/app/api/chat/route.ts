@@ -16,6 +16,12 @@ interface ChatRequestBody {
 
 export async function POST(req: NextRequest) {
   try {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      console.error("OPENROUTER_API_KEY is not set");
+      return NextResponse.json({ error: "서버 설정 오류입니다." }, { status: 500 });
+    }
+
     const body: ChatRequestBody = await req.json();
     const { message, sessionId, history = [] } = body;
 
@@ -26,15 +32,18 @@ export async function POST(req: NextRequest) {
     const messages: OpenRouterMessage[] = [
       { role: "system", content: MEDICAL_SYSTEM_PROMPT },
       ...history.slice(-10),
-      { role: "user", content: message },
+      {
+        role: "user",
+        content: `${message}\n\n반드시 위 시스템 프롬프트에 명시된 JSON 형식으로만 응답하세요.`,
+      },
     ];
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://medical-bot.vercel.app",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://medical-consultation-bot-nine.vercel.app",
         "X-Title": "Medical Consultation Bot",
       },
       body: JSON.stringify({
@@ -42,23 +51,27 @@ export async function POST(req: NextRequest) {
         messages,
         temperature: 0.7,
         max_tokens: 1500,
-        response_format: { type: "json_object" },
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("OpenRouter error:", errText);
+      console.error("OpenRouter API error:", response.status, errText);
       return NextResponse.json({ error: "AI 서비스 오류가 발생했습니다." }, { status: 502 });
     }
 
     const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content || "{}";
+    const rawContent: string = data.choices?.[0]?.message?.content ?? "{}";
 
-    let parsed: { message: string; analysis: ConsultationAnalysis };
+    // extract JSON block if the model wrapped it in markdown
+    const jsonMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)```/) ;
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : rawContent.trim();
+
+    let parsed: { message?: string; analysis?: ConsultationAnalysis };
     try {
-      parsed = JSON.parse(rawContent);
+      parsed = JSON.parse(jsonStr);
     } catch {
+      console.warn("JSON parse failed, using raw content. Raw:", rawContent.slice(0, 200));
       parsed = {
         message: rawContent,
         analysis: {
@@ -74,20 +87,27 @@ export async function POST(req: NextRequest) {
     const aiMessage = parsed.message || "응답을 처리하는 중 오류가 발생했습니다.";
     const analysis = parsed.analysis;
 
-    await supabase.from("consultation_records").insert({
-      session_id: sessionId,
-      user_message: message,
-      ai_response: aiMessage,
-      intent: analysis?.intent || null,
-      symptoms: analysis?.symptoms || null,
-      possible_conditions: analysis?.possibleConditions || null,
-      recommended_departments: analysis?.recommendedDepartments || null,
-      urgency_level: analysis?.urgencyLevel || null,
-    });
+    // fire-and-forget: don't let DB errors break the response
+    supabase
+      .from("consultation_records")
+      .insert({
+        session_id: sessionId,
+        user_message: message,
+        ai_response: aiMessage,
+        intent: analysis?.intent ?? null,
+        symptoms: analysis?.symptoms ?? null,
+        possible_conditions: analysis?.possibleConditions ?? null,
+        recommended_departments: analysis?.recommendedDepartments ?? null,
+        urgency_level: analysis?.urgencyLevel ?? null,
+      })
+      .then(({ error }) => {
+        if (error) console.error("Supabase insert error:", error.message);
+      });
 
     return NextResponse.json({ message: aiMessage, analysis });
   } catch (err) {
-    console.error("Chat API error:", err);
+    const stack = err instanceof Error ? err.stack : String(err);
+    console.error("Chat API error:", stack);
     return NextResponse.json({ error: "서버 오류가 발생했습니다." }, { status: 500 });
   }
 }
