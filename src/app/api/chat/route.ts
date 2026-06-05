@@ -12,7 +12,7 @@ interface ChatRequestBody {
 
 export async function POST(req: NextRequest) {
   try {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     if (!apiKey) {
       console.error("[chat] OPENROUTER_API_KEY is not set");
       return NextResponse.json({ error: "서버 설정 오류입니다." }, { status: 500 });
