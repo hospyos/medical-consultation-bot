@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       ...history,
       {
         role: "user",
-        content: `${message}\n\n반드시 위 시스템 프롬프트에 명시된 JSON 형식으로만 응답하세요.`,
+        content: message,
       },
     ];
 
