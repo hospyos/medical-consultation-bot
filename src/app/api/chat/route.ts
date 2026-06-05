@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     let completion: OpenAI.Chat.ChatCompletion;
     try {
       completion = await client.chat.completions.create({
-        model: "openrouter/auto",
+        model: "google/gemini-2.0-flash-001",
         messages,
         temperature: 0.7,
         max_tokens: 1500,
