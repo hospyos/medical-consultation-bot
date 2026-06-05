@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     let completion: OpenAI.Chat.ChatCompletion;
     try {
       completion = await client.chat.completions.create({
-        model: "openrouter/auto",
+        model: "qwen/qwen-2.5-72b-instruct:free",
         messages,
         temperature: 0.7,
         max_tokens: 1500,
